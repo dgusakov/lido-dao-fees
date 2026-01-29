@@ -52,7 +52,7 @@ def get_node_operators_active_keys(contract, block_number: int) -> (int, List[in
 
 
 def get_csm_reports_data():
-    fee_distributor = WEB3.eth.contract(address=CSM_FEE_DISTRIBUTOR_ADDRESS, abi=CSM_FEE_DISTRIBUTOR_ABI)
+    fee_distributor = WEB3.eth.contract(address=WEB3.to_checksum_address(CSM_FEE_DISTRIBUTOR_ADDRESS), abi=CSM_FEE_DISTRIBUTOR_ABI)
     module_fees = fee_distributor.events.ModuleFeeDistributed().get_logs(from_block=FROM_BLOCK)
     rebates = fee_distributor.events.RebateTransferred().get_logs(from_block=FROM_BLOCK)
     data = []
@@ -63,22 +63,22 @@ def get_csm_reports_data():
 
 
 def get_module_fee_percent(block_number, module_id):
-    sr = WEB3.eth.contract(address=STAKING_ROUTER_ADDRESS, abi=STAKING_ROUTER_ABI)
+    sr = WEB3.eth.contract(address=WEB3.to_checksum_address(STAKING_ROUTER_ADDRESS), abi=STAKING_ROUTER_ABI)
     module_data = sr.functions.getStakingModule(module_id).call(block_identifier=block_number)
     return module_data[2]
 
 
 def get_module_active_keys(block_number, module_id):
-    sr = WEB3.eth.contract(address=STAKING_ROUTER_ADDRESS, abi=STAKING_ROUTER_ABI)
+    sr = WEB3.eth.contract(address=WEB3.to_checksum_address(STAKING_ROUTER_ADDRESS), abi=STAKING_ROUTER_ABI)
     active_keys = sr.functions.getStakingModuleActiveValidatorsCount(module_id).call(block_identifier=block_number)
     return active_keys
 
 
-def calc_csm_dao_fee(module_fee_shares: int, rebate_shares: int, module_fee_on_sr: int) -> (float):
+def calc_csm_dao_fee(module_fee_shares: int, rebate_shares: int, module_fee_on_sr: int) -> float:
     return (1000 - module_fee_shares / ((module_fee_shares + rebate_shares) / module_fee_on_sr)) / 100
 
 
-def calc_sdvt_dao_fee(total_active: int, active_keys: List[int], module_fee_on_sr: int) -> (float):
+def calc_sdvt_dao_fee(total_active: int, active_keys: List[int], module_fee_on_sr: int) -> float:
     fee_accumulator = 0
     for no_id, keys in enumerate(active_keys):
         if no_id in SDVT_SUPER_CLUSTERS:
@@ -89,7 +89,7 @@ def calc_sdvt_dao_fee(total_active: int, active_keys: List[int], module_fee_on_s
     return dao_fee_share
 
 
-def calc_curated_dao_fee(total_active: int, active_keys: List[int], module_fee_on_sr: int) -> (float):
+def calc_curated_dao_fee(total_active: int, active_keys: List[int], module_fee_on_sr: int) -> float:
     if module_fee_on_sr == 500:
         return 5
     fee_accumulator = 0
@@ -104,9 +104,7 @@ def calc_curated_dao_fee(total_active: int, active_keys: List[int], module_fee_o
     return dao_fee_share
 
 
-def get_latest_fees_for_mudules():
-    web3 = Web3(Web3.HTTPProvider(WEB3_PROVIDER))
-
+def get_latest_fees_for_modules():
     print("Fetching CSM Oracle reports data...", end="", flush=True)
     csm_data = get_csm_reports_data()
     print("DONE")
@@ -123,7 +121,7 @@ def get_latest_fees_for_mudules():
         csm_dao_fee_shares.append(csm_dao_fee_share)
 
     print("Calculating Curated DAO fee shares...")
-    curated_contract = web3.eth.contract(address=CURATED_MODULE_ADDRESS, abi=NODE_OPERATORS_REGISTRY_ABI)
+    curated_contract = WEB3.eth.contract(address=WEB3.to_checksum_address(CURATED_MODULE_ADDRESS), abi=NODE_OPERATORS_REGISTRY_ABI)
     curated_dao_fee_shares = []
     for item in tqdm(csm_data):
         curated_fee_percent = get_module_fee_percent(item[2], CURATED_MODULE_ID)
@@ -133,7 +131,7 @@ def get_latest_fees_for_mudules():
         curated_dao_fee_shares.append(curated_dao_fee_share)
 
     print("Calculating SDVT DAO fee shares...")
-    sdvt_contract = web3.eth.contract(address=SDVT_MODULE_ADDRESS, abi=NODE_OPERATORS_REGISTRY_ABI)
+    sdvt_contract = WEB3.eth.contract(address=WEB3.to_checksum_address(SDVT_MODULE_ADDRESS), abi=NODE_OPERATORS_REGISTRY_ABI)
     sdvt_dao_fee_shares = []
     for item in tqdm(csm_data):
         sdvt_fee_percent = get_module_fee_percent(item[2], SDVT_MODULE_ID)
@@ -163,4 +161,4 @@ def get_latest_fees_for_mudules():
 
 
 if __name__ == "__main__":
-    get_latest_fees_for_mudules()
+    get_latest_fees_for_modules()
