@@ -136,7 +136,7 @@ def get_latest_fees_for_modules():
     for item in tqdm(csm_data):
         sdvt_fee_percent = get_module_fee_percent(item[2], SDVT_MODULE_ID)
         total_sdvt_active_keys, sdvt_active_keys = get_node_operators_active_keys(sdvt_contract, item[2])
-        sdvt_dao_fee_share = calc_curated_dao_fee(total_sdvt_active_keys, sdvt_active_keys, sdvt_fee_percent)
+        sdvt_dao_fee_share = calc_sdvt_dao_fee(total_sdvt_active_keys, sdvt_active_keys, sdvt_fee_percent)
         sdvt_dao_fee_shares.append(sdvt_dao_fee_share)
 
     print("Calculating total DAO fee shares...")
