@@ -2,6 +2,7 @@ from web3 import Web3
 from typing import List
 from tqdm import tqdm
 import os
+import datetime
 
 # Replace with your Ethereum node provider
 WEB3_PROVIDER = os.getenv("RPC_URL")
@@ -9,6 +10,8 @@ WEB3 = Web3(Web3.HTTPProvider(WEB3_PROVIDER))
 
 # The block from witch we fetch events. There should be at least one CSM Performance Oracle report after this block.
 FROM_BLOCK = 23649467
+
+ADDITIONAL_BLOCKS = [23704348, 23918490, 24139644, 24361874, 24562452]
 
 CURATED_MODULE_ADDRESS = "0x55032650b14df07b85bF18A3a3eC8E0Af2e028d5"
 CURATED_MODULE_ID = 1
@@ -38,6 +41,9 @@ CLIENT_TEAMS_FEE_PERCENT = 450
 SDVT_SUPER_CLUSTERS = [38, 39, 40, 41, 42, 43, 44, 45, 46, 47]
 SUPER_CLUSTERS_FEE_PERCENT = 600
 
+def get_block_date(block_number: int) -> str:
+    block = WEB3.eth.get_block(block_number)
+    return datetime.datetime.fromtimestamp(block.timestamp).strftime('%Y-%m-%d')
 
 def get_node_operators_active_keys(contract, block_number: int) -> (int, List[int]):
     count = contract.functions.getNodeOperatorsCount().call(block_identifier=block_number)
@@ -111,6 +117,16 @@ def get_latest_fees_for_modules():
     print(
         f"Fetched {len(csm_data)} CSM reports since block {FROM_BLOCK}, report blocks: {[data[2] for data in csm_data]}")
 
+    print("Inserting additional blocks data...", end="", flush=True)
+    for block in ADDITIONAL_BLOCKS:
+        for i in range(1,len(csm_data)):
+            if csm_data[i][2] > block:
+                csm_data.insert(i, [csm_data[i-1][0], csm_data[i-1][1], block])
+                break
+            if i == len(csm_data) - 1:
+                csm_data.append([csm_data[i][0], csm_data[i][1], block])
+    print("DONE")
+
     print("Calculating CSM DAO fee shares...")
     csm_fee_percents = []
     csm_dao_fee_shares = []
@@ -152,12 +168,12 @@ def get_latest_fees_for_modules():
                                                                                    total_sdvt_active_keys)
         total_dao_fee_shares.append(total_dao_fee_share)
 
-    print("\n=============== DAO Fee Report ===============")
-    print("|Block   |CSM     |Curated |SDVT    |Overall |")
-    print("|--------|--------|--------|--------|--------|")
+    print("\n===================== DAO Fee Report ====================")
+    print("|Block   |Date       |CSM     |Curated |SDVT    |Overall |")
+    print("|--------|-----------|--------|--------|--------|--------|")
     for i in range(len(csm_data)):
         print(
-            f"|{csm_data[i][2]}| {csm_dao_fee_shares[i]:.4f}%| {curated_dao_fee_shares[i]:.4f}%| {sdvt_dao_fee_shares[i]:.4f}%| {total_dao_fee_shares[i]:.4f}%|")
+            f"|{csm_data[i][2]}| {get_block_date(csm_data[i][2])}| {csm_dao_fee_shares[i]:.4f}%| {curated_dao_fee_shares[i]:.4f}%| {sdvt_dao_fee_shares[i]:.4f}%| {total_dao_fee_shares[i]:.4f}%|")
 
 
 if __name__ == "__main__":
