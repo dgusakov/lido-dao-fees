@@ -8,18 +8,23 @@ import datetime
 WEB3_PROVIDER = os.getenv("RPC_URL")
 WEB3 = Web3(Web3.HTTPProvider(WEB3_PROVIDER))
 
+# For pre-SRv3 blocks use old version from git history
 # The block from witch we fetch events. There should be at least one CSM Performance Oracle report after this block.
-FROM_BLOCK = 23649467
+FROM_BLOCK = 25656296
 
-ADDITIONAL_BLOCKS = [23704348, 23918490, 24139644, 24361874, 24562452, 24781027, 24996372, 25218801]
+ADDITIONAL_BLOCKS = []
 
 CURATED_MODULE_ADDRESS = "0x55032650b14df07b85bF18A3a3eC8E0Af2e028d5"
 CURATED_MODULE_ID = 1
+
 SDVT_MODULE_ADDRESS = "0xaE7B191A31f627b4eB1d4DaC64eaB9976995b433"
 SDVT_MODULE_ID = 2
 
 CSM_FEE_DISTRIBUTOR_ADDRESS = "0xD99CC66fEC647E68294C6477B40fC7E0F6F618D0"
 CS_MODULE_ID = 3
+
+CM_V2_FEE_DISTRIBUTOR_ADDRESS = "0x367d23c756599c20DCc8D6943F4976E8F88D60d7"
+CURATED_MODULE_V2_ID = 4
 
 STAKING_ROUTER_ADDRESS = "0xFdDf38947aFB03C621C71b06C9C70bce73f12999"
 STETH_ADDRESS = "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84"
@@ -27,7 +32,7 @@ STETH_ADDRESS = "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84"
 with open("abi/nor_abi.json", "r") as file:
     NODE_OPERATORS_REGISTRY_ABI = file.read()
 with open("abi/fee_distributor_abi.json", "r") as file:
-    CSM_FEE_DISTRIBUTOR_ABI = file.read()
+    FEE_DISTRIBUTOR_ABI = file.read()
 with open("abi/staking_router_abi.json", "r") as file:
     STAKING_ROUTER_ABI = file.read()
 
@@ -41,9 +46,11 @@ CLIENT_TEAMS_FEE_PERCENT = 450
 SDVT_SUPER_CLUSTERS = [38, 39, 40, 41, 42, 43, 44, 45, 46, 47]
 SUPER_CLUSTERS_FEE_PERCENT = 600
 
+
 def get_block_date(block_number: int) -> str:
     block = WEB3.eth.get_block(block_number)
     return datetime.datetime.fromtimestamp(block.timestamp).strftime('%Y-%m-%d')
+
 
 def get_node_operators_active_keys(contract, block_number: int) -> (int, List[int]):
     count = contract.functions.getNodeOperatorsCount().call(block_identifier=block_number)
@@ -57,15 +64,27 @@ def get_node_operators_active_keys(contract, block_number: int) -> (int, List[in
     return total_active, active_keys
 
 
-def get_csm_reports_data():
-    fee_distributor = WEB3.eth.contract(address=WEB3.to_checksum_address(CSM_FEE_DISTRIBUTOR_ADDRESS), abi=CSM_FEE_DISTRIBUTOR_ABI)
+def get_new_modules_reports_data(fee_distributor_address):
+    fee_distributor = WEB3.eth.contract(address=WEB3.to_checksum_address(fee_distributor_address),
+                                        abi=FEE_DISTRIBUTOR_ABI)
     module_fees = fee_distributor.events.ModuleFeeDistributed().get_logs(from_block=FROM_BLOCK)
     rebates = fee_distributor.events.RebateTransferred().get_logs(from_block=FROM_BLOCK)
     data = []
     for i in range(len(module_fees)):
-        assert module_fees[i].blockNumber == rebates[i].blockNumber, "Latest CSM report data mismatch"
+        assert module_fees[i].blockNumber == rebates[i].blockNumber, "Report data mismatch"
         data.append([module_fees[i].args['shares'], rebates[i].args['shares'], module_fees[i].blockNumber])
     return data
+
+
+def get_new_modules_data_for_block(reports_data, block_number):
+    for i in range(len(reports_data)):
+        if reports_data[i][2] == block_number:
+            return reports_data[i][0], reports_data[i][1]
+        if reports_data[i][2] > block_number and i > 0:
+            return reports_data[i - 1][0], reports_data[i - 1][1]
+        if i == len(reports_data) - 1:
+            return reports_data[i][0], reports_data[i][1]
+    return 0, 0
 
 
 def get_module_fee_percent(block_number, module_id):
@@ -74,13 +93,15 @@ def get_module_fee_percent(block_number, module_id):
     return module_data[2]
 
 
-def get_module_active_keys(block_number, module_id):
+def get_module_active_stake(block_number, module_id):
     sr = WEB3.eth.contract(address=WEB3.to_checksum_address(STAKING_ROUTER_ADDRESS), abi=STAKING_ROUTER_ABI)
-    active_keys = sr.functions.getStakingModuleActiveValidatorsCount(module_id).call(block_identifier=block_number)
-    return active_keys
+    active_stake = sr.functions.getModuleValidatorsBalance(module_id).call(block_identifier=block_number)
+    return active_stake
 
 
-def calc_csm_dao_fee(module_fee_shares: int, rebate_shares: int, module_fee_on_sr: int) -> float:
+def calc_new_module_dao_fee(module_fee_shares: int, rebate_shares: int, module_fee_on_sr: int) -> float:
+    if module_fee_shares == 0 and rebate_shares == 0:
+        return 10
     return (1000 - module_fee_shares / ((module_fee_shares + rebate_shares) / module_fee_on_sr)) / 100
 
 
@@ -112,69 +133,92 @@ def calc_curated_dao_fee(total_active: int, active_keys: List[int], module_fee_o
 
 def get_latest_fees_for_modules():
     print("Fetching CSM Oracle reports data...", end="", flush=True)
-    csm_data = get_csm_reports_data()
+    csm_data = get_new_modules_reports_data(CSM_FEE_DISTRIBUTOR_ADDRESS)
     print("DONE")
     print(
         f"Fetched {len(csm_data)} CSM reports since block {FROM_BLOCK}, report blocks: {[data[2] for data in csm_data]}")
 
+    print("Fetching CMv2 Oracle reports data...", end="", flush=True)
+    cm_v2_data = get_new_modules_reports_data(CM_V2_FEE_DISTRIBUTOR_ADDRESS)
+    print("DONE")
+    print(
+        f"Fetched {len(cm_v2_data)} CMv2 reports since block {FROM_BLOCK}, report blocks: {[data[2] for data in cm_v2_data]}")
+
     print("Inserting additional blocks data...", end="", flush=True)
-    for block in ADDITIONAL_BLOCKS:
-        for i in range(1,len(csm_data)):
-            if csm_data[i][2] > block:
-                csm_data.insert(i, [csm_data[i-1][0], csm_data[i-1][1], block])
-                break
-            if i == len(csm_data) - 1:
-                csm_data.append([csm_data[i][0], csm_data[i][1], block])
+    total_data = []
+    total_blocks = set([data[2] for data in csm_data] + [data[2] for data in cm_v2_data] + ADDITIONAL_BLOCKS)
+    for block in total_blocks:
+        total_data.append({"csm": get_new_modules_data_for_block(csm_data, block),
+                           "cmv2": get_new_modules_data_for_block(cm_v2_data, block), "block": block})
     print("DONE")
 
     print("Calculating CSM DAO fee shares...")
     csm_fee_percents = []
     csm_dao_fee_shares = []
-    for item in tqdm(csm_data):
-        csm_fee_percent = get_module_fee_percent(item[2], CS_MODULE_ID)
+    for item in tqdm(total_data):
+        data = item["csm"]
+        csm_fee_percent = get_module_fee_percent(item["block"], CS_MODULE_ID)
         csm_fee_percents.append(csm_fee_percent)
-        csm_dao_fee_share = calc_csm_dao_fee(item[0], item[1], csm_fee_percent)
+        csm_dao_fee_share = calc_new_module_dao_fee(data[0], data[1], csm_fee_percent)
         csm_dao_fee_shares.append(csm_dao_fee_share)
 
+    print("Calculating CMv2 DAO fee shares...")
+    cmv2_fee_percents = []
+    cmv2_dao_fee_shares = []
+    for item in tqdm(total_data):
+        data = item["cmv2"]
+        cmv2_fee_percent = get_module_fee_percent(item["block"], CS_MODULE_ID)
+        cmv2_fee_percents.append(cmv2_fee_percent)
+        cmv2_dao_fee_share = calc_new_module_dao_fee(data[0], data[1], cmv2_fee_percent)
+        cmv2_dao_fee_shares.append(cmv2_dao_fee_share)
+
     print("Calculating Curated DAO fee shares...")
-    curated_contract = WEB3.eth.contract(address=WEB3.to_checksum_address(CURATED_MODULE_ADDRESS), abi=NODE_OPERATORS_REGISTRY_ABI)
+    curated_contract = WEB3.eth.contract(address=WEB3.to_checksum_address(CURATED_MODULE_ADDRESS),
+                                         abi=NODE_OPERATORS_REGISTRY_ABI)
     curated_dao_fee_shares = []
-    for item in tqdm(csm_data):
-        curated_fee_percent = get_module_fee_percent(item[2], CURATED_MODULE_ID)
-        total_curated_active_keys, curated_active_keys = get_node_operators_active_keys(curated_contract, item[2])
+    for item in tqdm(total_data):
+        curated_fee_percent = get_module_fee_percent(item["block"], CURATED_MODULE_ID)
+        total_curated_active_keys, curated_active_keys = get_node_operators_active_keys(curated_contract, item["block"])
         curated_dao_fee_share = calc_curated_dao_fee(total_curated_active_keys, curated_active_keys,
                                                      curated_fee_percent)
         curated_dao_fee_shares.append(curated_dao_fee_share)
 
     print("Calculating SDVT DAO fee shares...")
-    sdvt_contract = WEB3.eth.contract(address=WEB3.to_checksum_address(SDVT_MODULE_ADDRESS), abi=NODE_OPERATORS_REGISTRY_ABI)
+    sdvt_contract = WEB3.eth.contract(address=WEB3.to_checksum_address(SDVT_MODULE_ADDRESS),
+                                      abi=NODE_OPERATORS_REGISTRY_ABI)
     sdvt_dao_fee_shares = []
-    for item in tqdm(csm_data):
-        sdvt_fee_percent = get_module_fee_percent(item[2], SDVT_MODULE_ID)
-        total_sdvt_active_keys, sdvt_active_keys = get_node_operators_active_keys(sdvt_contract, item[2])
+    for item in tqdm(total_data):
+        sdvt_fee_percent = get_module_fee_percent(item["block"], SDVT_MODULE_ID)
+        total_sdvt_active_keys, sdvt_active_keys = get_node_operators_active_keys(sdvt_contract, item["block"])
         sdvt_dao_fee_share = calc_sdvt_dao_fee(total_sdvt_active_keys, sdvt_active_keys, sdvt_fee_percent)
         sdvt_dao_fee_shares.append(sdvt_dao_fee_share)
 
     print("Calculating total DAO fee shares...")
     total_dao_fee_shares = []
-    for i in tqdm(range(len(csm_data))):
-        total_csm_active_keys = get_module_active_keys(csm_data[i][2], CS_MODULE_ID)
-        total_curated_active_keys = get_module_active_keys(csm_data[i][2], CURATED_MODULE_ID)
-        total_sdvt_active_keys = get_module_active_keys(csm_data[i][2], SDVT_MODULE_ID)
-        total_dao_fee_share = (total_csm_active_keys * csm_dao_fee_shares[i] +
-                               total_curated_active_keys * curated_dao_fee_shares[i] +
-                               total_sdvt_active_keys * sdvt_dao_fee_shares[i]) / (total_csm_active_keys +
-                                                                                   total_curated_active_keys +
-                                                                                   total_sdvt_active_keys)
+    for i in tqdm(range(len(total_data))):
+        total_csm_active_stake = get_module_active_stake(total_data[i]["block"], CS_MODULE_ID)
+        total_curated_active_stake = get_module_active_stake(total_data[i]["block"], CURATED_MODULE_ID)
+        total_sdvt_active_stake = get_module_active_stake(total_data[i]["block"], SDVT_MODULE_ID)
+        total_cmv2_active_stake = get_module_active_stake(total_data[i]["block"], CURATED_MODULE_V2_ID)
+        total_dao_fee_share = (total_csm_active_stake * csm_dao_fee_shares[i] +
+                               total_curated_active_stake * curated_dao_fee_shares[i] +
+                               total_sdvt_active_stake * sdvt_dao_fee_shares[i] +
+                               total_cmv2_active_stake * cmv2_dao_fee_shares[i]) / (total_csm_active_stake +
+                                                                                    total_curated_active_stake +
+                                                                                    total_sdvt_active_stake +
+                                                                                    total_cmv2_active_stake)
         total_dao_fee_shares.append(total_dao_fee_share)
 
-    print("\n===================== DAO Fee Report ====================")
-    print("|Block   |Date       |CSM     |Curated |SDVT    |Overall |")
-    print("|--------|-----------|--------|--------|--------|--------|")
-    for i in range(len(csm_data)):
-        print(
-            f"|{csm_data[i][2]}| {get_block_date(csm_data[i][2])}| {csm_dao_fee_shares[i]:.4f}%| {curated_dao_fee_shares[i]:.4f}%| {sdvt_dao_fee_shares[i]:.4f}%| {total_dao_fee_shares[i]:.4f}%|")
-
+    print("\n========================= DAO Fee Report =========================")
+    print("|Block   |Date      |CSM     |CMv1    |CMv2    |SDVT    |Overall |")
+    print("|--------|----------|--------|--------|--------|--------|--------|")
+    for i in range(len(total_data)):
+        if cmv2_dao_fee_shares[i] == 10:
+            print(
+                f"|{total_data[i]['block']}|{get_block_date(total_data[i]['block'])}|{csm_dao_fee_shares[i]:7.4f}%|{curated_dao_fee_shares[i]:7.4f}%|     N/A|{sdvt_dao_fee_shares[i]:7.4f}%|{total_dao_fee_shares[i]:7.4f}%|")
+        else:
+            print(
+                f"|{total_data[i]['block']}|{get_block_date(total_data[i]['block'])}|{csm_dao_fee_shares[i]:7.4f}%|{curated_dao_fee_shares[i]:7.4f}%|{cmv2_dao_fee_shares[i]:7.4f}%|{sdvt_dao_fee_shares[i]:7.4f}%|{total_dao_fee_shares[i]:7.4f}%|")
 
 if __name__ == "__main__":
     get_latest_fees_for_modules()
