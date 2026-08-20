@@ -14,7 +14,7 @@ EVENTS_FETCH_LIMIT = 10000  # Number of blocks to fetch events in one batch
 # The block from witch we fetch events. There should be at least one CSM Performance Oracle report after this block.
 FROM_BLOCK = 25656296
 
-ADDITIONAL_BLOCKS = []
+ADDITIONAL_BLOCKS = [25796694]
 
 CURATED_MODULE_ADDRESS = "0x55032650b14df07b85bF18A3a3eC8E0Af2e028d5"
 CURATED_MODULE_ID = 1
@@ -166,7 +166,7 @@ def get_latest_fees_for_modules():
 
     print("Inserting additional blocks data...", end="", flush=True)
     total_data = []
-    total_blocks = set([data[2] for data in csm_data] + [data[2] for data in cm_v2_data] + ADDITIONAL_BLOCKS)
+    total_blocks = sorted(set([data[2] for data in csm_data] + [data[2] for data in cm_v2_data] + ADDITIONAL_BLOCKS))
     for block in total_blocks:
         total_data.append({"csm": get_new_modules_data_for_block(csm_data, block),
                            "cmv2": get_new_modules_data_for_block(cm_v2_data, block), "block": block})
