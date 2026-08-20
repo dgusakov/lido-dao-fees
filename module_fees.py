@@ -8,6 +8,8 @@ import datetime
 WEB3_PROVIDER = os.getenv("RPC_URL")
 WEB3 = Web3(Web3.HTTPProvider(WEB3_PROVIDER))
 
+EVENTS_FETCH_LIMIT = 10000  # Number of blocks to fetch events in one batch
+
 # For pre-SRv3 blocks use old version from git history
 # The block from witch we fetch events. There should be at least one CSM Performance Oracle report after this block.
 FROM_BLOCK = 25656296
@@ -47,6 +49,19 @@ SDVT_SUPER_CLUSTERS = [38, 39, 40, 41, 42, 43, 44, 45, 46, 47]
 SUPER_CLUSTERS_FEE_PERCENT = 600
 
 
+def get_latest_block() -> int:
+    return WEB3.eth.block_number
+
+def get_fees_and_rebates_logs(contract, from_block: int):
+    module_fees = []
+    rebates = []
+    latest_block = get_latest_block()
+    for block in range(from_block, latest_block + 1, EVENTS_FETCH_LIMIT):
+        to_block = min(block + 9999, latest_block)
+        module_fees.extend(contract.events.ModuleFeeDistributed().get_logs(from_block=block, to_block=to_block))
+        rebates.extend(contract.events.RebateTransferred().get_logs(from_block=block, to_block=to_block))
+    return module_fees, rebates
+
 def get_block_date(block_number: int) -> str:
     block = WEB3.eth.get_block(block_number)
     return datetime.datetime.fromtimestamp(block.timestamp).strftime('%Y-%m-%d')
@@ -67,12 +82,17 @@ def get_node_operators_active_keys(contract, block_number: int) -> (int, List[in
 def get_new_modules_reports_data(fee_distributor_address):
     fee_distributor = WEB3.eth.contract(address=WEB3.to_checksum_address(fee_distributor_address),
                                         abi=FEE_DISTRIBUTOR_ABI)
-    module_fees = fee_distributor.events.ModuleFeeDistributed().get_logs(from_block=FROM_BLOCK)
-    rebates = fee_distributor.events.RebateTransferred().get_logs(from_block=FROM_BLOCK)
+    module_fees, rebates = get_fees_and_rebates_logs(fee_distributor, FROM_BLOCK)
     data = []
     for i in range(len(module_fees)):
-        assert module_fees[i].blockNumber == rebates[i].blockNumber, "Report data mismatch"
-        data.append([module_fees[i].args['shares'], rebates[i].args['shares'], module_fees[i].blockNumber])
+        rebate_found = False
+        for j in range(len(rebates)):
+            if module_fees[i].blockNumber == rebates[j].blockNumber:
+                data.append([module_fees[i].args['shares'], rebates[i].args['shares'], module_fees[i].blockNumber])
+                rebate_found = True
+                break
+        if not rebate_found:
+            data.append([module_fees[i].args['shares'], 0, module_fees[i].blockNumber])
     return data
 
 
