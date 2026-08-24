@@ -39,11 +39,15 @@ with open("abi/staking_router_abi.json", "r") as file:
     STAKING_ROUTER_ABI = file.read()
 
 CURATED_SPECIAL = {
-    "EE": [2, 3, 18, 30, 31],
+    "EE": [0, 2, 4],
+    "DO": [7, 22],
     "ClientTeams": [21, 25, 26, 27, 28, 29, 33]
 }
-EE_FEE_PERCENT = 400
+EE_AND_DO_FEE_PERCENT = 400
 CLIENT_TEAMS_FEE_PERCENT = 450
+CLIENT_TEAMS_FEE_PERCENT_UPDATED = 400
+
+CLIENT_TEAMS_FEE_UPDATE_BLOCK = 35656296 # TODO: Update this block number when the fee percent changes for client teams
 
 SDVT_SUPER_CLUSTERS = [38, 39, 40, 41, 42, 43, 44, 45, 46, 47]
 SUPER_CLUSTERS_FEE_PERCENT = 600
@@ -51,6 +55,7 @@ SUPER_CLUSTERS_FEE_PERCENT = 600
 
 def get_latest_block() -> int:
     return WEB3.eth.block_number
+
 
 def get_fees_and_rebates_logs(contract, from_block: int):
     module_fees = []
@@ -61,6 +66,7 @@ def get_fees_and_rebates_logs(contract, from_block: int):
         module_fees.extend(contract.events.ModuleFeeDistributed().get_logs(from_block=block, to_block=to_block))
         rebates.extend(contract.events.RebateTransferred().get_logs(from_block=block, to_block=to_block))
     return module_fees, rebates
+
 
 def get_block_date(block_number: int) -> str:
     block = WEB3.eth.get_block(block_number)
@@ -136,15 +142,18 @@ def calc_sdvt_dao_fee(total_active: int, active_keys: List[int], module_fee_on_s
     return dao_fee_share
 
 
-def calc_curated_dao_fee(total_active: int, active_keys: List[int], module_fee_on_sr: int) -> float:
+def calc_curated_dao_fee(total_active: int, active_keys: List[int], module_fee_on_sr: int, block: int) -> float:
     if module_fee_on_sr == 500:
         return 5
     fee_accumulator = 0
     for no_id, keys in enumerate(active_keys):
-        if no_id in CURATED_SPECIAL["EE"]:
-            fee_accumulator += keys * EE_FEE_PERCENT
+        if no_id in CURATED_SPECIAL["EE"] or no_id in CURATED_SPECIAL["DO"]:
+            fee_accumulator += keys * EE_AND_DO_FEE_PERCENT
         elif no_id in CURATED_SPECIAL["ClientTeams"]:
-            fee_accumulator += keys * CLIENT_TEAMS_FEE_PERCENT
+            if block > CLIENT_TEAMS_FEE_UPDATE_BLOCK:
+                fee_accumulator += keys * CLIENT_TEAMS_FEE_PERCENT_UPDATED
+            else:
+                fee_accumulator += keys * CLIENT_TEAMS_FEE_PERCENT
         else:
             fee_accumulator += keys * module_fee_on_sr
     dao_fee_share = (1000 - (fee_accumulator / total_active)) / 100
@@ -200,7 +209,7 @@ def get_latest_fees_for_modules():
         curated_fee_percent = get_module_fee_percent(item["block"], CURATED_MODULE_ID)
         total_curated_active_keys, curated_active_keys = get_node_operators_active_keys(curated_contract, item["block"])
         curated_dao_fee_share = calc_curated_dao_fee(total_curated_active_keys, curated_active_keys,
-                                                     curated_fee_percent)
+                                                     curated_fee_percent, item["block"])
         curated_dao_fee_shares.append(curated_dao_fee_share)
 
     print("Calculating SDVT DAO fee shares...")
