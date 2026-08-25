@@ -101,16 +101,23 @@ def get_new_modules_reports_data(fee_distributor_address):
             data.append([module_fees[i].args['shares'], 0, module_fees[i].blockNumber])
     return data
 
-
+# We assume reports are sorted
 def get_new_modules_data_for_block(reports_data, block_number):
-    for i in range(len(reports_data)):
-        if reports_data[i][2] == block_number:
-            return reports_data[i][0], reports_data[i][1]
-        if reports_data[i][2] > block_number and i > 0:
+    reports_count = len(reports_data)
+    # No reports at all, return empty data
+    if reports_count == 0:
+        return 0, 0
+
+    # Before the first report block, return empty data
+    if block_number < reports_data[0][2]:
+        return 0, 0
+    # After and at the last report block, return last report data
+    if block_number >= reports_data[reports_count - 1][2]:
+        return reports_data[reports_count - 1][0], reports_data[reports_count - 1][1]
+
+    for i in range(1, len(reports_data)):
+        if reports_data[i][2] > block_number:
             return reports_data[i - 1][0], reports_data[i - 1][1]
-        if i == len(reports_data) - 1:
-            return reports_data[i][0], reports_data[i][1]
-    return 0, 0
 
 
 def get_module_fee_percent(block_number, module_id):
@@ -196,7 +203,7 @@ def get_latest_fees_for_modules():
     cmv2_dao_fee_shares = []
     for item in tqdm(total_data):
         data = item["cmv2"]
-        cmv2_fee_percent = get_module_fee_percent(item["block"], CS_MODULE_ID)
+        cmv2_fee_percent = get_module_fee_percent(item["block"], CURATED_MODULE_V2_ID)
         cmv2_fee_percents.append(cmv2_fee_percent)
         cmv2_dao_fee_share = calc_new_module_dao_fee(data[0], data[1], cmv2_fee_percent)
         cmv2_dao_fee_shares.append(cmv2_dao_fee_share)
