@@ -94,7 +94,7 @@ def get_new_modules_reports_data(fee_distributor_address):
         rebate_found = False
         for j in range(len(rebates)):
             if module_fees[i].blockNumber == rebates[j].blockNumber:
-                data.append([module_fees[i].args['shares'], rebates[i].args['shares'], module_fees[i].blockNumber])
+                data.append([module_fees[i].args['shares'], rebates[j].args['shares'], module_fees[i].blockNumber])
                 rebate_found = True
                 break
         if not rebate_found:
