@@ -14,7 +14,7 @@ EVENTS_FETCH_LIMIT = 10000  # Number of blocks to fetch events in one batch
 # The block from witch we fetch events. There should be at least one CSM Performance Oracle report after this block.
 FROM_BLOCK = 25656296
 
-ADDITIONAL_BLOCKS = [25796694]
+ADDITIONAL_BLOCKS = [25796694, 25878708]
 
 CURATED_MODULE_ADDRESS = "0x55032650b14df07b85bF18A3a3eC8E0Af2e028d5"
 CURATED_MODULE_ID = 1
@@ -47,7 +47,7 @@ EE_AND_DO_FEE_PERCENT = 400
 CLIENT_TEAMS_FEE_PERCENT = 450
 CLIENT_TEAMS_FEE_PERCENT_UPDATED = 400
 
-CLIENT_TEAMS_FEE_UPDATE_BLOCK = 35656296 # TODO: Update this block number when the fee percent changes for client teams
+CLIENT_TEAMS_FEE_UPDATE_BLOCK = 25878707
 
 SDVT_SUPER_CLUSTERS = [38, 39, 40, 41, 42, 43, 44, 45, 46, 47]
 SUPER_CLUSTERS_FEE_PERCENT = 600
